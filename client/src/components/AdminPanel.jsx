@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import axios from 'axios'
-import { Upload, CheckCircle, AlertCircle, FileText } from 'lucide-react'
+import { Upload, CheckCircle, AlertCircle, FileText, BarChart3 } from 'lucide-react'
+import StatsPanel from './StatsPanel'
 
 function AdminPanel({ onQcmCreated }) {
+  const [activeTab, setActiveTab] = useState('upload')
   const [file, setFile] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [message, setMessage] = useState(null)
@@ -48,12 +50,42 @@ function AdminPanel({ onQcmCreated }) {
   }
 
   return (
-    <div className="max-w-2xl mx-auto">
-      <div className="bg-white rounded-lg shadow-lg p-8">
-        <div className="flex items-center space-x-3 mb-6">
-          <FileText className="w-10 h-10 text-indigo-600" />
-          <h2 className="text-3xl font-bold text-gray-900">Panneau d'Administration</h2>
+    <div className="max-w-6xl mx-auto">
+      <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+        {/* Onglets */}
+        <div className="flex border-b border-gray-200">
+          <button
+            onClick={() => setActiveTab('upload')}
+            className={`flex items-center space-x-2 px-6 py-4 font-semibold transition-colors ${
+              activeTab === 'upload'
+                ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50'
+                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+            }`}
+          >
+            <Upload className="w-5 h-5" />
+            <span>Upload Questionnaire</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('stats')}
+            className={`flex items-center space-x-2 px-6 py-4 font-semibold transition-colors ${
+              activeTab === 'stats'
+                ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50'
+                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+            }`}
+          >
+            <BarChart3 className="w-5 h-5" />
+            <span>Statistiques</span>
+          </button>
         </div>
+
+        {/* Contenu des onglets */}
+        <div className="p-8">
+          {activeTab === 'upload' ? (
+            <div>
+              <div className="flex items-center space-x-3 mb-6">
+                <FileText className="w-10 h-10 text-indigo-600" />
+                <h2 className="text-3xl font-bold text-gray-900">Upload du Questionnaire</h2>
+              </div>
 
         <div className="mb-6">
           <h3 className="text-lg font-semibold text-gray-700 mb-3">Format du fichier Word:</h3>
@@ -129,6 +161,11 @@ Réponse libre`}
               <AlertCircle className="w-5 h-5 text-red-600" />
               <p className="text-red-700">{error}</p>
             </div>
+          )}
+        </div>
+            </div>
+          ) : (
+            <StatsPanel />
           )}
         </div>
       </div>

@@ -11,6 +11,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 const QCM_FILE = path.join(__dirname, 'qcm-data.json');
+const RESPONSES_FILE = path.join(__dirname, 'responses-data.json');
 
 // Charger le questionnaire sauvegardé au démarrage
 let currentQCM = null;
@@ -21,6 +22,18 @@ if (fs.existsSync(QCM_FILE)) {
     console.log('Questionnaire chargé depuis le fichier');
   } catch (error) {
     console.error('Erreur lors du chargement du questionnaire:', error);
+  }
+}
+
+// Charger les réponses sauvegardées
+let responses = [];
+if (fs.existsSync(RESPONSES_FILE)) {
+  try {
+    const data = fs.readFileSync(RESPONSES_FILE, 'utf8');
+    responses = JSON.parse(data);
+    console.log(`${responses.length} réponses chargées`);
+  } catch (error) {
+    console.error('Erreur lors du chargement des réponses:', error);
   }
 }
 
@@ -199,6 +212,71 @@ app.get('/api/qcm', (req, res) => {
   res.json(qcmForUser);
 });
 
+app.get('/api/stats', (req, res) => {
+  if (!currentQCM) {
+    return res.status(404).json({ error: 'Aucun questionnaire disponible' });
+  }
+
+  // Calculer les statistiques pour chaque question
+  const stats = currentQCM.questions.map(question => {
+    const questionStats = {
+      id: question.id,
+      question: question.question,
+      type: question.type,
+      totalResponses: responses.length,
+      optionCounts: {}
+    };
+
+    if (question.type === 'text') {
+      // Pour les questions texte, on liste toutes les réponses
+      questionStats.textResponses = responses.map(r => {
+        const answer = r.answers[question.id];
+        return answer || 'Non répondu';
+      });
+    } else {
+      // Pour les questions à choix, compter les réponses par option
+      question.options.forEach((option, index) => {
+        questionStats.optionCounts[index] = 0;
+      });
+
+      responses.forEach(response => {
+        const answer = response.answers[question.id];
+        if (answer !== undefined && answer !== null) {
+          if (question.type === 'multiple' && Array.isArray(answer)) {
+            // Choix multiple
+            answer.forEach(idx => {
+              if (questionStats.optionCounts[idx] !== undefined) {
+                questionStats.optionCounts[idx]++;
+              }
+            });
+          } else if (question.type === 'single') {
+            // Choix unique
+            if (questionStats.optionCounts[answer] !== undefined) {
+              questionStats.optionCounts[answer]++;
+            }
+          }
+        }
+      });
+
+      // Convertir en tableau avec les noms des options
+      questionStats.options = question.options.map((option, index) => ({
+        text: option,
+        count: questionStats.optionCounts[index] || 0,
+        percentage: responses.length > 0 
+          ? ((questionStats.optionCounts[index] || 0) / responses.length * 100).toFixed(1)
+          : 0
+      }));
+    }
+
+    return questionStats;
+  });
+
+  res.json({
+    totalResponses: responses.length,
+    questions: stats
+  });
+});
+
 app.post('/api/submit', async (req, res) => {
   try {
     const { answers } = req.body;
@@ -238,6 +316,24 @@ app.post('/api/submit', async (req, res) => {
     });
 
     const responseId = Date.now();
+    
+    // Sauvegarder la réponse dans le fichier
+    const responseData = {
+      id: responseId,
+      timestamp: new Date().toISOString(),
+      answers: answers,
+      results: results
+    };
+    
+    responses.push(responseData);
+    
+    try {
+      fs.writeFileSync(RESPONSES_FILE, JSON.stringify(responses, null, 2));
+      console.log('Réponse sauvegardée');
+    } catch (error) {
+      console.error('Erreur lors de la sauvegarde de la réponse:', error);
+    }
+    
     const emailContent = `
       <h2>Nouvelle réponse au questionnaire</h2>
       <p><strong>Réponse #:</strong> ${responseId}</p>
