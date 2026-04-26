@@ -1,0 +1,30 @@
+{
+  "name": "qcm-app",
+  "version": "1.0.0",
+  "description": "Application QCM avec upload de fichier Word et envoi par email",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "nodemon server/index.js",
+    "client": "cd client && npm run dev",
+    "build": "cd client && npm install && npm run build",
+    "start": "node server/index.js",
+    "postinstall": "cd client && npm install"
+  },
+  "keywords": ["qcm", "quiz", "email", "word"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "multer": "^1.4.5-lts.1",
+    "mammoth": "^1.6.0",
+    "nodemailer": "^6.9.7",
+    "dotenv": "^16.3.1",
+    "body-parser": "^1.20.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "concurrently": "^8.2.2"
+  }
+}

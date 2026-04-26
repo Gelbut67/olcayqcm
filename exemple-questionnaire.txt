@@ -1,0 +1,31 @@
+Créez un fichier Word (.docx) avec ce contenu pour tester l'application:
+
+1. Quelle est votre tranche d'âge?
+a) 18-25 ans
+b) 26-35 ans
+c) 36-45 ans
+d) 46 ans et plus
+
+2. Quel est votre niveau de satisfaction?
+a) Très satisfait
+b) Satisfait
+c) Peu satisfait
+d) Pas satisfait
+
+3. À quelle fréquence utilisez-vous ce service?
+a) Quotidiennement
+b) Hebdomadairement
+c) Mensuellement
+d) Rarement
+
+4. Recommanderiez-vous ce service?
+a) Certainement
+b) Probablement
+c) Peut-être
+d) Non
+
+5. Quel est votre secteur d'activité?
+a) Technologie
+b) Santé
+c) Éducation
+d) Autre
