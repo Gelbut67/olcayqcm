@@ -7,5 +7,6 @@ package-lock.json
 client/package-lock.json
 server/qcm-data.json
 server/responses-data.json
+server/questionnaires-data.json
 *.log
 .DS_Store

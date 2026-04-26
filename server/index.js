@@ -10,31 +10,42 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-const QCM_FILE = path.join(__dirname, 'qcm-data.json');
-const RESPONSES_FILE = path.join(__dirname, 'responses-data.json');
+const QUESTIONNAIRES_FILE = path.join(__dirname, 'questionnaires-data.json');
 
-// Charger le questionnaire sauvegardé au démarrage
-let currentQCM = null;
-if (fs.existsSync(QCM_FILE)) {
+// Structure: { questionnaires: [{id, name, active, createdAt, qcm, responses}], activeId }
+let questionnairesData = {
+  questionnaires: [],
+  activeId: null
+};
+
+// Charger tous les questionnaires au démarrage
+if (fs.existsSync(QUESTIONNAIRES_FILE)) {
   try {
-    const data = fs.readFileSync(QCM_FILE, 'utf8');
-    currentQCM = JSON.parse(data);
-    console.log('Questionnaire chargé depuis le fichier');
+    const data = fs.readFileSync(QUESTIONNAIRES_FILE, 'utf8');
+    questionnairesData = JSON.parse(data);
+    console.log(`${questionnairesData.questionnaires.length} questionnaire(s) chargé(s)`);
+    if (questionnairesData.activeId) {
+      console.log(`Questionnaire actif: ${questionnairesData.activeId}`);
+    }
   } catch (error) {
-    console.error('Erreur lors du chargement du questionnaire:', error);
+    console.error('Erreur lors du chargement des questionnaires:', error);
   }
 }
 
-// Charger les réponses sauvegardées
-let responses = [];
-if (fs.existsSync(RESPONSES_FILE)) {
+// Fonction pour sauvegarder les questionnaires
+function saveQuestionnaires() {
   try {
-    const data = fs.readFileSync(RESPONSES_FILE, 'utf8');
-    responses = JSON.parse(data);
-    console.log(`${responses.length} réponses chargées`);
+    fs.writeFileSync(QUESTIONNAIRES_FILE, JSON.stringify(questionnairesData, null, 2));
+    console.log('Questionnaires sauvegardés');
   } catch (error) {
-    console.error('Erreur lors du chargement des réponses:', error);
+    console.error('Erreur lors de la sauvegarde:', error);
   }
+}
+
+// Fonction pour obtenir le questionnaire actif
+function getActiveQuestionnaire() {
+  if (!questionnairesData.activeId) return null;
+  return questionnairesData.questionnaires.find(q => q.id === questionnairesData.activeId);
 }
 
 app.use(cors());
@@ -168,25 +179,39 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'Aucun fichier uploadé' });
     }
 
+    const { questionnaireName } = req.body;
+    if (!questionnaireName || questionnaireName.trim() === '') {
+      return res.status(400).json({ error: 'Le nom du questionnaire est requis' });
+    }
+
     const result = await mammoth.extractRawText({ path: req.file.path });
     const qcm = parseWordToQCM(result.value);
     
-    currentQCM = qcm;
+    // Créer un nouveau questionnaire
+    const newQuestionnaire = {
+      id: Date.now().toString(),
+      name: questionnaireName.trim(),
+      createdAt: new Date().toISOString(),
+      qcm: qcm,
+      responses: []
+    };
 
-    // Sauvegarder le questionnaire dans un fichier
-    try {
-      fs.writeFileSync(QCM_FILE, JSON.stringify(qcm, null, 2));
-      console.log('Questionnaire sauvegardé dans le fichier');
-    } catch (error) {
-      console.error('Erreur lors de la sauvegarde:', error);
-    }
+    // Ajouter le questionnaire à la liste
+    questionnairesData.questionnaires.push(newQuestionnaire);
+    
+    // Définir comme actif
+    questionnairesData.activeId = newQuestionnaire.id;
+    
+    // Sauvegarder
+    saveQuestionnaires();
 
     fs.unlinkSync(req.file.path);
 
     res.json({ 
       success: true, 
-      message: 'Fichier uploadé et traité avec succès',
-      questionsCount: qcm.questions.length
+      message: 'Questionnaire créé avec succès',
+      questionsCount: qcm.questions.length,
+      questionnaireId: newQuestionnaire.id
     });
   } catch (error) {
     console.error('Erreur:', error);
@@ -195,13 +220,14 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 });
 
 app.get('/api/qcm', (req, res) => {
-  if (!currentQCM) {
+  const activeQ = getActiveQuestionnaire();
+  if (!activeQ) {
     return res.status(404).json({ error: 'Aucun questionnaire disponible' });
   }
 
   const qcmForUser = {
-    title: currentQCM.title,
-    questions: currentQCM.questions.map(q => ({
+    title: activeQ.qcm.title,
+    questions: activeQ.qcm.questions.map(q => ({
       id: q.id,
       question: q.question,
       options: q.options,
@@ -213,12 +239,23 @@ app.get('/api/qcm', (req, res) => {
 });
 
 app.get('/api/stats', (req, res) => {
-  if (!currentQCM) {
+  const { questionnaireId } = req.query;
+  
+  let questionnaire;
+  if (questionnaireId) {
+    questionnaire = questionnairesData.questionnaires.find(q => q.id === questionnaireId);
+  } else {
+    questionnaire = getActiveQuestionnaire();
+  }
+  
+  if (!questionnaire) {
     return res.status(404).json({ error: 'Aucun questionnaire disponible' });
   }
 
+  const responses = questionnaire.responses || [];
+
   // Calculer les statistiques pour chaque question
-  const stats = currentQCM.questions.map(question => {
+  const stats = questionnaire.qcm.questions.map(question => {
     const questionStats = {
       id: question.id,
       question: question.question,
@@ -281,11 +318,12 @@ app.post('/api/submit', async (req, res) => {
   try {
     const { answers } = req.body;
 
-    if (!currentQCM) {
+    const activeQ = getActiveQuestionnaire();
+    if (!activeQ) {
       return res.status(404).json({ error: 'Aucun questionnaire disponible' });
     }
 
-    const results = currentQCM.questions.map(q => {
+    const results = activeQ.qcm.questions.map(q => {
       const userAnswer = answers[q.id];
       let formattedAnswer = 'Non répondu';
       
@@ -325,14 +363,11 @@ app.post('/api/submit', async (req, res) => {
       results: results
     };
     
-    responses.push(responseData);
+    // Ajouter la réponse au questionnaire actif
+    activeQ.responses.push(responseData);
     
-    try {
-      fs.writeFileSync(RESPONSES_FILE, JSON.stringify(responses, null, 2));
-      console.log('Réponse sauvegardée');
-    } catch (error) {
-      console.error('Erreur lors de la sauvegarde de la réponse:', error);
-    }
+    // Sauvegarder tous les questionnaires
+    saveQuestionnaires();
     
     const emailContent = `
       <h2>Nouvelle réponse au questionnaire</h2>
@@ -368,6 +403,58 @@ app.post('/api/submit', async (req, res) => {
       details: error.message 
     });
   }
+});
+
+// Lister tous les questionnaires
+app.get('/api/questionnaires', (req, res) => {
+  const questionnaires = questionnairesData.questionnaires.map(q => ({
+    id: q.id,
+    name: q.name,
+    createdAt: q.createdAt,
+    questionsCount: q.qcm.questions.length,
+    responsesCount: q.responses.length,
+    isActive: q.id === questionnairesData.activeId
+  }));
+  
+  res.json({
+    questionnaires,
+    activeId: questionnairesData.activeId
+  });
+});
+
+// Activer un questionnaire
+app.post('/api/questionnaires/:id/activate', (req, res) => {
+  const { id } = req.params;
+  const questionnaire = questionnairesData.questionnaires.find(q => q.id === id);
+  
+  if (!questionnaire) {
+    return res.status(404).json({ error: 'Questionnaire non trouvé' });
+  }
+  
+  questionnairesData.activeId = id;
+  saveQuestionnaires();
+  
+  res.json({ success: true, message: 'Questionnaire activé' });
+});
+
+// Supprimer un questionnaire
+app.delete('/api/questionnaires/:id', (req, res) => {
+  const { id } = req.params;
+  const index = questionnairesData.questionnaires.findIndex(q => q.id === id);
+  
+  if (index === -1) {
+    return res.status(404).json({ error: 'Questionnaire non trouvé' });
+  }
+  
+  // Si c'est le questionnaire actif, le désactiver
+  if (questionnairesData.activeId === id) {
+    questionnairesData.activeId = null;
+  }
+  
+  questionnairesData.questionnaires.splice(index, 1);
+  saveQuestionnaires();
+  
+  res.json({ success: true, message: 'Questionnaire supprimé' });
 });
 
 app.get('*', (req, res) => {
