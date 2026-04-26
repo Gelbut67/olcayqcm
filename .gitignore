@@ -3,5 +3,8 @@ node_modules/
 uploads/
 client/node_modules/
 client/dist/
+package-lock.json
+client/package-lock.json
+server/qcm-data.json
 *.log
 .DS_Store

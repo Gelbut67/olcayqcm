@@ -3,18 +3,29 @@ const cors = require('cors');
 const multer = require('multer');
 const mammoth = require('mammoth');
 const nodemailer = require('nodemailer');
-const dotenv = require('dotenv');
 const path = require('path');
 const fs = require('fs');
-const bodyParser = require('body-parser');
-
-dotenv.config();
+require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+const QCM_FILE = path.join(__dirname, 'qcm-data.json');
+
+// Charger le questionnaire sauvegardé au démarrage
+let currentQCM = null;
+if (fs.existsSync(QCM_FILE)) {
+  try {
+    const data = fs.readFileSync(QCM_FILE, 'utf8');
+    currentQCM = JSON.parse(data);
+    console.log('Questionnaire chargé depuis le fichier');
+  } catch (error) {
+    console.error('Erreur lors du chargement du questionnaire:', error);
+  }
+}
+
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 app.use(express.static(path.join(__dirname, '../client/dist')));
 
 const uploadDir = path.join(__dirname, '../uploads');
@@ -42,8 +53,6 @@ const upload = multer({
     }
   }
 });
-
-let currentQCM = null;
 
 function parseWordToQCM(text) {
   console.log('=== DEBUT DU PARSING ===');
@@ -151,12 +160,20 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     
     currentQCM = qcm;
 
+    // Sauvegarder le questionnaire dans un fichier
+    try {
+      fs.writeFileSync(QCM_FILE, JSON.stringify(qcm, null, 2));
+      console.log('Questionnaire sauvegardé dans le fichier');
+    } catch (error) {
+      console.error('Erreur lors de la sauvegarde:', error);
+    }
+
     fs.unlinkSync(req.file.path);
 
     res.json({ 
       success: true, 
-      message: 'Questionnaire créé avec succès',
-      questionCount: qcm.questions.length
+      message: 'Fichier uploadé et traité avec succès',
+      questionsCount: qcm.questions.length
     });
   } catch (error) {
     console.error('Erreur:', error);
