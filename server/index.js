@@ -10,7 +10,11 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-const QUESTIONNAIRES_FILE = path.join(__dirname, 'questionnaires-data.json');
+// Utiliser le Persistent Disk de Render si disponible, sinon le dossier local
+const DATA_DIR = process.env.DATA_PATH || __dirname;
+const QUESTIONNAIRES_FILE = path.join(DATA_DIR, 'questionnaires-data.json');
+
+console.log(`Dossier de données: ${DATA_DIR}`);
 
 // Structure: { questionnaires: [{id, name, active, createdAt, qcm, responses}], activeId }
 let questionnairesData = {
