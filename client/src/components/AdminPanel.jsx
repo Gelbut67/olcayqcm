@@ -37,7 +37,7 @@ function AdminPanel({ onQcmCreated }) {
         }
       })
 
-      setMessage(`Questionnaire créé avec succès! ${response.data.questionCount} questions chargées.`)
+      setMessage(`Questionnaire créé avec succès! ${response.data.questionsCount} questions chargées.`)
       setFile(null)
       onQcmCreated()
     } catch (err) {
