@@ -247,8 +247,13 @@ app.post('/api/submit', async (req, res) => {
       message: 'Réponses envoyées avec succès'
     });
   } catch (error) {
-    console.error('Erreur:', error);
-    res.status(500).json({ error: 'Erreur lors de l\'envoi des réponses' });
+    console.error('Erreur complète:', error);
+    console.error('Message d\'erreur:', error.message);
+    console.error('Stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Erreur lors de l\'envoi des réponses',
+      details: error.message 
+    });
   }
 });
 
