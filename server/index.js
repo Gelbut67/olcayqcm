@@ -7,50 +7,10 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
+const db = require('./database');
+
 const app = express();
 const PORT = process.env.PORT || 3001;
-
-// Utiliser le Persistent Disk de Render si disponible, sinon le dossier local
-const DATA_DIR = process.env.DATA_PATH || __dirname;
-const QUESTIONNAIRES_FILE = path.join(DATA_DIR, 'questionnaires-data.json');
-
-console.log(`Dossier de données: ${DATA_DIR}`);
-
-// Structure: { questionnaires: [{id, name, active, createdAt, qcm, responses}], activeId }
-let questionnairesData = {
-  questionnaires: [],
-  activeId: null
-};
-
-// Charger tous les questionnaires au démarrage
-if (fs.existsSync(QUESTIONNAIRES_FILE)) {
-  try {
-    const data = fs.readFileSync(QUESTIONNAIRES_FILE, 'utf8');
-    questionnairesData = JSON.parse(data);
-    console.log(`${questionnairesData.questionnaires.length} questionnaire(s) chargé(s)`);
-    if (questionnairesData.activeId) {
-      console.log(`Questionnaire actif: ${questionnairesData.activeId}`);
-    }
-  } catch (error) {
-    console.error('Erreur lors du chargement des questionnaires:', error);
-  }
-}
-
-// Fonction pour sauvegarder les questionnaires
-function saveQuestionnaires() {
-  try {
-    fs.writeFileSync(QUESTIONNAIRES_FILE, JSON.stringify(questionnairesData, null, 2));
-    console.log('Questionnaires sauvegardés');
-  } catch (error) {
-    console.error('Erreur lors de la sauvegarde:', error);
-  }
-}
-
-// Fonction pour obtenir le questionnaire actif
-function getActiveQuestionnaire() {
-  if (!questionnairesData.activeId) return null;
-  return questionnairesData.questionnaires.find(q => q.id === questionnairesData.activeId);
-}
 
 app.use(cors());
 app.use(express.json());
@@ -192,22 +152,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     const qcm = parseWordToQCM(result.value);
     
     // Créer un nouveau questionnaire
-    const newQuestionnaire = {
-      id: Date.now().toString(),
-      name: questionnaireName.trim(),
-      createdAt: new Date().toISOString(),
-      qcm: qcm,
-      responses: []
-    };
-
-    // Ajouter le questionnaire à la liste
-    questionnairesData.questionnaires.push(newQuestionnaire);
-    
-    // Définir comme actif
-    questionnairesData.activeId = newQuestionnaire.id;
-    
-    // Sauvegarder
-    saveQuestionnaires();
+    const id = Date.now().toString();
+    await db.createQuestionnaire(id, questionnaireName.trim(), qcm);
 
     fs.unlinkSync(req.file.path);
 
@@ -215,7 +161,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       success: true, 
       message: 'Questionnaire créé avec succès',
       questionsCount: qcm.questions.length,
-      questionnaireId: newQuestionnaire.id
+      questionnaireId: id
     });
   } catch (error) {
     console.error('Erreur:', error);
@@ -223,8 +169,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-app.get('/api/qcm', (req, res) => {
-  const activeQ = getActiveQuestionnaire();
+app.get('/api/qcm', async (req, res) => {
+  const activeQ = await db.getActiveQuestionnaire();
   if (!activeQ) {
     return res.status(404).json({ error: 'Aucun questionnaire disponible' });
   }
@@ -242,14 +188,14 @@ app.get('/api/qcm', (req, res) => {
   res.json(qcmForUser);
 });
 
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', async (req, res) => {
   const { questionnaireId } = req.query;
   
   let questionnaire;
   if (questionnaireId) {
-    questionnaire = questionnairesData.questionnaires.find(q => q.id === questionnaireId);
+    questionnaire = await db.getQuestionnaireById(questionnaireId);
   } else {
-    questionnaire = getActiveQuestionnaire();
+    questionnaire = await db.getActiveQuestionnaire();
   }
   
   if (!questionnaire) {
@@ -322,7 +268,7 @@ app.post('/api/submit', async (req, res) => {
   try {
     const { answers } = req.body;
 
-    const activeQ = getActiveQuestionnaire();
+    const activeQ = await db.getActiveQuestionnaire();
     if (!activeQ) {
       return res.status(404).json({ error: 'Aucun questionnaire disponible' });
     }
@@ -357,21 +303,10 @@ app.post('/api/submit', async (req, res) => {
       }
     });
 
-    const responseId = Date.now();
+    const responseId = Date.now().toString();
     
-    // Sauvegarder la réponse dans le fichier
-    const responseData = {
-      id: responseId,
-      timestamp: new Date().toISOString(),
-      answers: answers,
-      results: results
-    };
-    
-    // Ajouter la réponse au questionnaire actif
-    activeQ.responses.push(responseData);
-    
-    // Sauvegarder tous les questionnaires
-    saveQuestionnaires();
+    // Sauvegarder la réponse dans la base de données
+    await db.createResponse(responseId, activeQ.id, answers, results);
     
     const emailContent = `
       <h2>Nouvelle réponse au questionnaire</h2>
@@ -410,53 +345,45 @@ app.post('/api/submit', async (req, res) => {
 });
 
 // Lister tous les questionnaires
-app.get('/api/questionnaires', (req, res) => {
-  const questionnaires = questionnairesData.questionnaires.map(q => ({
+app.get('/api/questionnaires', async (req, res) => {
+  const allQuestionnaires = await db.getAllQuestionnaires();
+  const activeQ = await db.getActiveQuestionnaire();
+  
+  const questionnaires = allQuestionnaires.map(q => ({
     id: q.id,
     name: q.name,
     createdAt: q.createdAt,
     questionsCount: q.qcm.questions.length,
-    responsesCount: q.responses.length,
-    isActive: q.id === questionnairesData.activeId
+    responsesCount: q.responsesCount,
+    isActive: q.isActive
   }));
   
   res.json({
     questionnaires,
-    activeId: questionnairesData.activeId
+    activeId: activeQ ? activeQ.id : null
   });
 });
 
 // Activer un questionnaire
-app.post('/api/questionnaires/:id/activate', (req, res) => {
+app.post('/api/questionnaires/:id/activate', async (req, res) => {
   const { id } = req.params;
-  const questionnaire = questionnairesData.questionnaires.find(q => q.id === id);
+  const success = await db.activateQuestionnaire(id);
   
-  if (!questionnaire) {
+  if (!success) {
     return res.status(404).json({ error: 'Questionnaire non trouvé' });
   }
-  
-  questionnairesData.activeId = id;
-  saveQuestionnaires();
   
   res.json({ success: true, message: 'Questionnaire activé' });
 });
 
 // Supprimer un questionnaire
-app.delete('/api/questionnaires/:id', (req, res) => {
+app.delete('/api/questionnaires/:id', async (req, res) => {
   const { id } = req.params;
-  const index = questionnairesData.questionnaires.findIndex(q => q.id === id);
+  const success = await db.deleteQuestionnaire(id);
   
-  if (index === -1) {
+  if (!success) {
     return res.status(404).json({ error: 'Questionnaire non trouvé' });
   }
-  
-  // Si c'est le questionnaire actif, le désactiver
-  if (questionnairesData.activeId === id) {
-    questionnairesData.activeId = null;
-  }
-  
-  questionnairesData.questionnaires.splice(index, 1);
-  saveQuestionnaires();
   
   res.json({ success: true, message: 'Questionnaire supprimé' });
 });
