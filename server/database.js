@@ -8,48 +8,65 @@ const USE_POSTGRES = !!process.env.DATABASE_URL;
 let pool = null;
 let questionnairesData = { questionnaires: [], activeId: null };
 const JSON_FILE = path.join(__dirname, 'questionnaires-data.json');
+let dbReady = false;
 
-if (USE_POSTGRES) {
-  console.log('🐘 Utilisation de PostgreSQL');
-  pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
-  });
+// Fonction d'initialisation asynchrone
+async function initDatabase() {
+  if (USE_POSTGRES) {
+    console.log('🐘 Utilisation de PostgreSQL');
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false }
+    });
 
-  // Créer les tables
-  pool.query(`
-    CREATE TABLE IF NOT EXISTS questionnaires (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      created_at TIMESTAMP NOT NULL,
-      qcm_data JSONB NOT NULL,
-      is_active BOOLEAN DEFAULT FALSE
-    );
-
-    CREATE TABLE IF NOT EXISTS responses (
-      id TEXT PRIMARY KEY,
-      questionnaire_id TEXT NOT NULL REFERENCES questionnaires(id) ON DELETE CASCADE,
-      timestamp TIMESTAMP NOT NULL,
-      answers_data JSONB NOT NULL,
-      results_data JSONB NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_active ON questionnaires(is_active);
-    CREATE INDEX IF NOT EXISTS idx_responses_qid ON responses(questionnaire_id);
-  `).then(() => console.log('✅ Tables PostgreSQL créées'))
-    .catch(err => console.error('❌ Erreur création tables:', err));
-} else {
-  console.log('📁 Utilisation de fichiers JSON locaux');
-  // Charger les données JSON
-  if (fs.existsSync(JSON_FILE)) {
+    // Créer les tables et attendre
     try {
-      questionnairesData = JSON.parse(fs.readFileSync(JSON_FILE, 'utf8'));
-      console.log(`✅ ${questionnairesData.questionnaires.length} questionnaire(s) chargé(s)`);
-    } catch (error) {
-      console.error('❌ Erreur chargement JSON:', error);
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS questionnaires (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          created_at TIMESTAMP NOT NULL,
+          qcm_data JSONB NOT NULL,
+          is_active BOOLEAN DEFAULT FALSE
+        );
+
+        CREATE TABLE IF NOT EXISTS responses (
+          id TEXT PRIMARY KEY,
+          questionnaire_id TEXT NOT NULL REFERENCES questionnaires(id) ON DELETE CASCADE,
+          timestamp TIMESTAMP NOT NULL,
+          answers_data JSONB NOT NULL,
+          results_data JSONB NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_active ON questionnaires(is_active);
+        CREATE INDEX IF NOT EXISTS idx_responses_qid ON responses(questionnaire_id);
+      `);
+      console.log('✅ Tables PostgreSQL créées');
+      dbReady = true;
+    } catch (err) {
+      console.error('❌ Erreur création tables:', err);
+      throw err;
     }
+  } else {
+    console.log('📁 Utilisation de fichiers JSON locaux');
+    // Charger les données JSON
+    if (fs.existsSync(JSON_FILE)) {
+      try {
+        questionnairesData = JSON.parse(fs.readFileSync(JSON_FILE, 'utf8'));
+        console.log(`✅ ${questionnairesData.questionnaires.length} questionnaire(s) chargé(s)`);
+      } catch (error) {
+        console.error('❌ Erreur chargement JSON:', error);
+      }
+    }
+    dbReady = true;
   }
 }
+
+// Initialiser la base de données
+initDatabase().catch(err => {
+  console.error('❌ Erreur fatale initialisation DB:', err);
+  process.exit(1);
+});
 
 // Fonction pour sauvegarder en JSON
 function saveJSON() {
@@ -58,10 +75,23 @@ function saveJSON() {
   }
 }
 
+// Fonction pour attendre que la DB soit prête
+async function ensureDbReady() {
+  let attempts = 0;
+  while (!dbReady && attempts < 50) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    attempts++;
+  }
+  if (!dbReady) {
+    throw new Error('Base de données non initialisée');
+  }
+}
+
 // API unifiée
 const db = {
   // Créer un questionnaire
   async createQuestionnaire(id, name, qcm) {
+    await ensureDbReady();
     if (USE_POSTGRES) {
       await pool.query('UPDATE questionnaires SET is_active = FALSE');
       await pool.query(
@@ -113,6 +143,7 @@ const db = {
 
   // Récupérer le questionnaire actif
   async getActiveQuestionnaire() {
+    await ensureDbReady();
     if (USE_POSTGRES) {
       const qResult = await pool.query(
         'SELECT id, name, created_at as "createdAt", qcm_data as qcm FROM questionnaires WHERE is_active = TRUE LIMIT 1'
@@ -158,6 +189,7 @@ const db = {
 
   // Activer un questionnaire
   async activateQuestionnaire(id) {
+    await ensureDbReady();
     if (USE_POSTGRES) {
       await pool.query('UPDATE questionnaires SET is_active = FALSE');
       const result = await pool.query('UPDATE questionnaires SET is_active = TRUE WHERE id = $1', [id]);
@@ -196,6 +228,7 @@ const db = {
 
   // Ajouter une réponse
   async createResponse(id, questionnaireId, answers, results) {
+    await ensureDbReady();
     if (USE_POSTGRES) {
       await pool.query(
         'INSERT INTO responses (id, questionnaire_id, timestamp, answers_data, results_data) VALUES ($1, $2, NOW(), $3, $4)',
