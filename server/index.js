@@ -295,44 +295,52 @@ app.post('/api/submit', async (req, res) => {
       };
     });
 
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-      }
-    });
-
     const responseId = Date.now().toString();
     
-    // Sauvegarder la réponse dans la base de données
+    // Sauvegarder la réponse dans la base de données AVANT d'envoyer l'email
     await db.createResponse(responseId, activeQ.id, answers, results);
     
-    const emailContent = `
-      <h2>Nouvelle réponse au questionnaire</h2>
-      <p><strong>Réponse #:</strong> ${responseId}</p>
-      <p><strong>Date:</strong> ${new Date().toLocaleString('fr-FR')}</p>
-      <hr>
-      <h3>Réponses:</h3>
-      ${results.map((r, i) => `
-        <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-left: 4px solid #4f46e5; border-radius: 5px;">
-          <p style="margin: 0 0 10px 0;"><strong>Question ${i + 1}:</strong> ${r.question}</p>
-          <p style="margin: 0; color: #4f46e5; font-weight: 500;"><strong>Réponse:</strong> ${r.userAnswer}</p>
-        </div>
-      `).join('')}
-    `;
-
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: process.env.EMAIL_TO,
-      subject: `Réponse questionnaire #${responseId}`,
-      html: emailContent
-    });
-
+    // Répondre immédiatement au client
     res.json({ 
       success: true, 
-      message: 'Réponses envoyées avec succès'
+      message: 'Réponses enregistrées avec succès'
     });
+
+    // Envoyer l'email de façon asynchrone (ne bloque pas la réponse)
+    try {
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASS
+        }
+      });
+
+      const emailContent = `
+        <h2>Nouvelle réponse au questionnaire</h2>
+        <p><strong>Réponse #:</strong> ${responseId}</p>
+        <p><strong>Date:</strong> ${new Date().toLocaleString('fr-FR')}</p>
+        <hr>
+        <h3>Réponses:</h3>
+        ${results.map((r, i) => `
+          <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-left: 4px solid #4f46e5; border-radius: 5px;">
+            <p style="margin: 0 0 10px 0;"><strong>Question ${i + 1}:</strong> ${r.question}</p>
+            <p style="margin: 0; color: #4f46e5; font-weight: 500;"><strong>Réponse:</strong> ${r.userAnswer}</p>
+          </div>
+        `).join('')}
+      `;
+
+      await transporter.sendMail({
+        from: process.env.EMAIL_USER,
+        to: process.env.EMAIL_TO,
+        subject: `Réponse questionnaire #${responseId}`,
+        html: emailContent
+      });
+      
+      console.log(`✅ Email envoyé pour la réponse #${responseId}`);
+    } catch (emailError) {
+      console.error('⚠️ Erreur envoi email (réponse sauvegardée):', emailError.message);
+    }
   } catch (error) {
     console.error('Erreur complète:', error);
     console.error('Message d\'erreur:', error.message);
